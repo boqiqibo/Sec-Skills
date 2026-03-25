@@ -12,17 +12,64 @@ This skill helps locate BoringSSL SSL_write/SSL_read function addresses in Flutt
 
 ecapture's `--ssl_write_addr` / `--ssl_read_addr` require **ELF file offset**, not IDA virtual address.
 
-For libflutter.so, the `.text` PT_LOAD segment typically satisfies: `VirtAddr = FileOffset + 0x1000`
+### ⚠️ 重要：不要假设固定偏移量
 
-Therefore: **`file_offset = IDA_VA - 0x1000`**
+**错误做法**：假设 `file_offset = IDA_VA - 0x1000`
+- 这个 0x1000 偏移量是假设值，不同版本的 libflutter.so 可能有不同的段布局
+- 直接使用假设值会导致 ecapture hook 失败
 
-Verification (IDA Python):
+### 正确计算方法
+
+**方法一：使用 IDA Python API（推荐）**
 ```python
 import idaapi
-print(hex(idaapi.get_fileregion_offset(0xYOUR_VA)))
+
+# 获取准确的文件偏移
+ida_va = 0xYOUR_VA  # 替换为实际地址
+file_offset = idaapi.get_fileregion_offset(ida_va)
+print(f"IDA VA: {hex(ida_va)}")
+print(f"File Offset: {hex(file_offset)}")
 ```
 
-`ssl_read_inner_offset` is a relative offset (BL_VA - SSL_read_VA), both addresses in the same segment, offset cancels out, **no need to subtract 0x1000**.
+**方法二：读取 ELF PT_LOAD 段信息**
+```python
+import idaapi
+
+def get_file_offset(va):
+    """
+    通过遍历 PT_LOAD 段计算文件偏移
+    公式: file_offset = VA - VirtAddr + FileOffset
+    """
+    for seg in idautils.Segments():
+        seg_ea = idc.get_segm_start(seg)
+        seg_end = idc.get_segm_end(seg)
+        if seg_ea <= va < seg_end:
+            # 获取段的文件偏移
+            seg_file_offset = idaapi.get_fileregion_offset(seg_ea)
+            return va - seg_ea + seg_file_offset
+    return None
+```
+
+**方法三：使用 readelf 命令验证**
+```bash
+# 查看 PT_LOAD 段布局
+readelf -l libflutter.so | grep LOAD
+
+# 输出示例：
+#   LOAD           0x000000 0x00000000 0x00000000 0xXXXXXX 0xXXXXXX R
+#   LOAD           0xXXXXXX 0xXXXXXX 0xXXXXXX 0xXXXXXX 0xXXXXXX R E
+# 
+# 其中：FileOffset = 第一列, VirtAddr = 第三列
+# file_offset = IDA_VA - VirtAddr + FileOffset
+```
+
+### ssl_read_inner_offset 计算
+
+`ssl_read_inner_offset` 是相对偏移（BL_VA - SSL_read_VA），两地址在同一段内相减，偏差自动消除：
+```
+ssl_read_inner_offset = BL_VA - SSL_read_entry_VA
+```
+**无需转换为文件偏移**，ecapture 直接使用这个相对偏移值。
 
 ## Known Conditions
 
@@ -155,12 +202,37 @@ Replace the bytecode in the Frida script based on whether the .so is 32-bit or 6
 ```
 SSL_write IDA VA : 0xXXXXXX
 SSL_read IDA VA : 0xXXXXXX
-ssl_read_inner_offset : 0xXXX (= BL_VA - SSL_read_entry_VA, no need to subtract 0x1000)
+ssl_read_inner_offset : 0xXXX (= BL_VA - SSL_read_entry_VA)
 
-# ecapture actual parameters (file offset = IDA VA - 0x1000):
---ssl_write_addr 0xXXXXXX (= SSL_write_IDA_VA - 0x1000)
---ssl_read_addr 0xXXXXXX (= SSL_read_IDA_VA - 0x1000)
---ssl_read_inner_offset 0xXXX (same as IDA offset)
+# 计算文件偏移（使用 IDA Python）：
+import idaapi
+ssl_write_file_offset = idaapi.get_fileregion_offset(SSL_write_IDA_VA)
+ssl_read_file_offset = idaapi.get_fileregison_offset(SSL_read_IDA_VA)
+
+# ecapture 实际传参：
+--ssl_write_addr 0xXXXXXX (file offset, 通过 get_fileregion_offset 计算)
+--ssl_read_addr 0xXXXXXX (file offset, 通过 get_fileregion_offset 计算)
+--ssl_read_inner_offset 0xXXX (相对偏移，直接使用 BL_VA - SSL_read_entry_VA)
+```
+
+### 验证步骤
+
+1. **验证文件偏移计算正确性**：
+```python
+# 在 IDA Python 中执行
+import idaapi
+va = 0xYOUR_VA
+offset = idaapi.get_fileregion_offset(va)
+print(f"VA: {hex(va)} -> File Offset: {hex(offset)}")
+```
+
+2. **验证 ssl_read_inner_offset**：
+```python
+# 确认 BL 指令在 SSL_read 函数内部
+bl_va = 0xYOUR_BL_VA
+ssl_read_va = 0xYOUR_SSL_READ_VA
+inner_offset = bl_va - ssl_read_va
+print(f"ssl_read_inner_offset: {hex(inner_offset)}")
 ```
 
 ---
