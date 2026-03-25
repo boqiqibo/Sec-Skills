@@ -1,0 +1,23 @@
+{
+  "skill_name": "flutter-ssl-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我有一个 Flutter Android ARM64 的 libflutter.so 文件，需要在 IDA 中定位 BoringSSL 的 SSL_write 和 SSL_read 函数地址，用于 ecapture 抓包。请帮我分析定位步骤。",
+      "expected_output": "提供完整的 SSL_write/SSL_read 定位流程，包括从 __errno PLT 开始的逐步分析方法",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我已经找到了 SSL_read 函数地址，现在需要计算 ssl_read_inner_offset 用于 ecapture inner probe。请告诉我如何找到 memcpy wrapper stub 并计算偏移。",
+      "expected_output": "提供 ssl_read_inner_offset 的计算方法，包括识别 memcpy wrapper stub 的特征和计算公式",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我需要生成一个 Frida 脚本来绕过 Flutter SSL 证书验证。libflutter.so 是 64 位的，请帮我搜索 ssl_client 字符串并更新脚本。",
+      "expected_output": "提供 Frida SSL bypass 脚本生成流程，包括字节码提取和脚本更新步骤",
+      "files": []
+    }
+  ]
+}
